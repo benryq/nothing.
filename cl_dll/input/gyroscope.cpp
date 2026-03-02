@@ -1,5 +1,5 @@
 /* Xash3D/CS 1.6 Gyroscope Feature BY PowerSiderS
-	Modification Fixes By NaruTo 1.6 */
+   Modification Fixes BY NaruTo 1.6 */
 
 #include "hud.h"
 #include "usercmd.h"
@@ -14,6 +14,8 @@
 
 cvar_t *gyroscope;
 cvar_t *gyroscope_sensitivity;
+cvar_t *gyroscope_invert_x;
+cvar_t *gyroscope_invert_y;
 
 #ifdef __ANDROID__
 
@@ -28,28 +30,43 @@ static int64_t g_iLastTimestamp = 0;
 static bool g_bGyroInitialized = false;
 static bool g_bGyroSensorEnabled = false;
 static bool g_bFirstEvent = true;
+
 static float g_flSmoothYaw = 0.0f;
 static float g_flSmoothPitch = 0.0f;
-static float g_flYawAccum = 0.0f;
-static float g_flPitchAccum = 0.0f;
-
-static const float GYRO_RAD2DEG = 57.2957795f;
-static const float GYRO_MIN_DEADZONE = 0.010f;
-static const float GYRO_MIN_ALPHA = 0.18f;
-static const float GYRO_MAX_ALPHA = 0.75f;
-static const float GYRO_ALPHA_SCALE = 3.5f;
 
 static const float NS2S = 1.0f / 1000000000.0f;
+
+// =========================
+// Helper Functions
+// =========================
+
+static float ApplyDeadzone(float v, float dz)
+{
+	if (fabsf(v) < dz)
+		return 0.0f;
+
+	float sign = (v > 0) ? 1.0f : -1.0f;
+	float norm = (fabsf(v) - dz) / (1.0f - dz);
+	return sign * norm;
+}
+
+static float ApplyCurve(float v)
+{
+	float sign = (v > 0) ? 1.0f : -1.0f;
+	return sign * powf(fabsf(v), 1.6f); // PUBG-like curve
+}
+
 
 static void Gyro_EnableSensor(void)
 {
 	if (!g_bGyroInitialized || !g_pSensorEventQueue || !g_pGyroSensor)
 		return;
-	
+
 	if (!g_bGyroSensorEnabled)
 	{
 		ASensorEventQueue_enableSensor(g_pSensorEventQueue, g_pGyroSensor);
 		ASensorEventQueue_setEventRate(g_pSensorEventQueue, g_pGyroSensor, 16666);
+
 		g_bGyroSensorEnabled = true;
 		g_bFirstEvent = true;
 		g_flGyroYaw = 0.0f;
@@ -61,7 +78,7 @@ static void Gyro_DisableSensor(void)
 {
 	if (!g_bGyroInitialized || !g_pSensorEventQueue || !g_pGyroSensor)
 		return;
-	
+
 	if (g_bGyroSensorEnabled)
 	{
 		ASensorEventQueue_disableSensor(g_pSensorEventQueue, g_pGyroSensor);
@@ -73,111 +90,92 @@ static void Gyro_DisableSensor(void)
 
 static int Gyro_SensorCallback(int fd, int events, void *data)
 {
-    ASensorEvent event;
+	ASensorEvent event;
 
-    while (ASensorEventQueue_getEvents(g_pSensorEventQueue, &event, 1) > 0)
-    {
-        if (event.type != ASENSOR_TYPE_GYROSCOPE)
-            continue;
+	while (ASensorEventQueue_getEvents(g_pSensorEventQueue, &event, 1) > 0)
+	{
+		if (event.type != ASENSOR_TYPE_GYROSCOPE)
+			continue;
 
-       
-        if (g_bFirstEvent)
-        {
-            g_iLastTimestamp = event.timestamp;
-            g_bFirstEvent = false;
-            continue;
-        }
+		if (g_bFirstEvent)
+		{
+			g_iLastTimestamp = event.timestamp;
+			g_bFirstEvent = false;
+			continue;
+		}
 
-       
-        float dT = (float)(event.timestamp - g_iLastTimestamp) * NS2S;
-        g_iLastTimestamp = event.timestamp;
+		float dT = (float)(event.timestamp - g_iLastTimestamp) * NS2S;
+		g_iLastTimestamp = event.timestamp;
 
-        if (dT <= 0.0f || dT > 0.5f)
-            continue;
+		if (dT <= 0.0f || dT > 0.5f)
+			continue;
 
-        
-        float gyroX = event.data[0];
-        float gyroY = event.data[1];
+		float gyroX = event.data[0];
+		float gyroY = event.data[1];
 
-      
-        float rawYaw   = -gyroX;   
-        float rawPitch =  gyroY;  
+		float rawYaw   = -gyroX;
+		float rawPitch = -gyroY;
 
-       
-        if (fabsf(rawYaw) < 0.010f) rawYaw = 0.0f;
-        if (fabsf(rawPitch) < 0.010f) rawPitch = 0.0f;
+		// Invert controls
+		if (gyroscope_invert_x && gyroscope_invert_x->value != 0.0f)
+			rawYaw = -rawYaw;
 
-        
-        float sens = (gyroscope_sensitivity && gyroscope_sensitivity->value > 0.0f)
-                     ? gyroscope_sensitivity->value : 1.0f;
+		if (gyroscope_invert_y && gyroscope_invert_y->value != 0.0f)
+			rawPitch = -rawPitch;
 
-        float expo = sens * (1.0f + sens * 0.25f);
+		rawYaw   = ApplyDeadzone(rawYaw, 0.015f);
+		rawPitch = ApplyDeadzone(rawPitch, 0.015f);
 
-        
-        float scaledYaw   = rawYaw   * dT * expo * 57.2957795f;
-        float scaledPitch = rawPitch * dT * expo * 57.2957795f;
+		rawYaw   = ApplyCurve(rawYaw);
+		rawPitch = ApplyCurve(rawPitch);
 
-        
-        float mag = fmaxf(fabsf(scaledYaw), fabsf(scaledPitch));
+		float sens = (gyroscope_sensitivity && gyroscope_sensitivity->value > 0.0f)
+		             ? gyroscope_sensitivity->value : 1.0f;
 
-       
-        float baseAlpha = dT * 140.0f; 
+		float base = 120.0f;
 
-        if (baseAlpha < 0.12f) baseAlpha = 0.12f; 
-        if (baseAlpha > 0.30f) baseAlpha = 0.30f;  
+		float scaledYaw   = rawYaw   * dT * base * sens;
+		float scaledPitch = rawPitch * dT * base * sens;
 
-        
-        float alpha = baseAlpha + mag * 0.40f;
+		float alpha = 0.18f;
 
-        if (alpha > 0.85f)
-            alpha = 0.85f; 
+		g_flSmoothYaw   = g_flSmoothYaw   * (1.0f - alpha) + scaledYaw   * alpha;
+		g_flSmoothPitch = g_flSmoothPitch * (1.0f - alpha) + scaledPitch * alpha;
 
-        
-        g_flSmoothYaw   = g_flSmoothYaw   * (1.0f - alpha) + scaledYaw   * alpha;
-        g_flSmoothPitch = g_flSmoothPitch * (1.0f - alpha) + scaledPitch * alpha;
 
-        g_flGyroYaw   += g_flSmoothYaw;
-        g_flGyroPitch += g_flSmoothPitch;
-    }
+		g_flGyroYaw   += g_flSmoothYaw;
+		g_flGyroPitch += g_flSmoothPitch;
+	}
 
-    return 1;
+	return 1;
 }
-
-
-
-
 
 void Gyro_Init(void)
 {
 	gyroscope = gEngfuncs.pfnRegisterVariable("gyroscope", "0", FCVAR_ARCHIVE);
-	gyroscope_sensitivity = gEngfuncs.pfnRegisterVariable("gyroscope_sensitivity", "1.0", FCVAR_ARCHIVE);
-	
+	gyroscope_sensitivity = gEngfuncs.pfnRegisterVariable("gyroscope_sensitivity", "1.8", FCVAR_ARCHIVE);
+
+	gyroscope_invert_x = gEngfuncs.pfnRegisterVariable("gyroscope_invert_x", "0", FCVAR_ARCHIVE);
+	gyroscope_invert_y = gEngfuncs.pfnRegisterVariable("gyroscope_invert_y", "0", FCVAR_ARCHIVE);
+
 	g_pSensorManager = ASensorManager_getInstance();
 	if (!g_pSensorManager)
 	{
 		gEngfuncs.Con_Printf("Gyroscope: Failed to get sensor manager\n");
 		return;
 	}
-	
+
 	g_pGyroSensor = ASensorManager_getDefaultSensor(g_pSensorManager, ASENSOR_TYPE_GYROSCOPE);
 	if (!g_pGyroSensor)
 	{
-		gEngfuncs.Con_Printf("Gyroscope: Gyroscope sensor not available\n");
+		gEngfuncs.Con_Printf("Gyroscope: Gyroscope not available\n");
 		return;
 	}
-	
+
 	g_pLooper = ALooper_forThread();
 	if (!g_pLooper)
-	{
 		g_pLooper = ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS);
-	}
-	
-	if (!g_pLooper)
-	{
-		gEngfuncs.Con_Printf("Gyroscope: Failed to get looper\n");
-		return;
-	}
-	
+
 	g_pSensorEventQueue = ASensorManager_createEventQueue(
 		g_pSensorManager,
 		g_pLooper,
@@ -185,96 +183,68 @@ void Gyro_Init(void)
 		Gyro_SensorCallback,
 		NULL
 	);
-	
-	if (!g_pSensorEventQueue)
-	{
-		gEngfuncs.Con_Printf("Gyroscope: Failed to create event queue\n");
-		return;
-	}
-	
+
 	g_bGyroInitialized = true;
-	g_bGyroSensorEnabled = false;
-	g_bFirstEvent = true;
-	g_flGyroYaw = 0.0f;
-	g_flGyroPitch = 0.0f;
-	
-	gEngfuncs.Con_Printf("Gyroscope: Initialized successfully\n");
+
+	gEngfuncs.Con_Printf("Gyroscope: PUBG-style initialized\n");
 }
 
 void Gyro_Shutdown(void)
 {
 	Gyro_DisableSensor();
-	
+
 	if (g_pSensorManager && g_pSensorEventQueue)
-	{
 		ASensorManager_destroyEventQueue(g_pSensorManager, g_pSensorEventQueue);
-	}
-	
-	g_pSensorEventQueue = NULL;
-	g_pGyroSensor = NULL;
-	g_pSensorManager = NULL;
-	g_pLooper = NULL;
+
 	g_bGyroInitialized = false;
-	
-	gEngfuncs.Con_Printf("Gyroscope: Shutdown\n");
 }
+
 
 void Gyro_Update(float *yaw, float *pitch)
 {
-    if (!g_bGyroInitialized)
-        return;
+	if (!g_bGyroInitialized)
+		return;
 
-    bool bShouldEnable = (gyroscope && gyroscope->value != 0.0f);
+	bool enable = (gyroscope && gyroscope->value != 0.0f);
 
-    if (bShouldEnable && !g_bGyroSensorEnabled)
-    {
-        Gyro_EnableSensor();
-    }
-    else if (!bShouldEnable && g_bGyroSensorEnabled)
-    {
-        Gyro_DisableSensor();
-    }
+	if (enable && !g_bGyroSensorEnabled)
+		Gyro_EnableSensor();
+	else if (!enable && g_bGyroSensorEnabled)
+		Gyro_DisableSensor();
 
-    if (!g_bGyroSensorEnabled)
-    {
-        g_flSmoothYaw = g_flSmoothPitch = 0.0f;
-        g_flGyroYaw = g_flGyroPitch = 0.0f;
-        if (yaw) *yaw = 0.0f;
-        if (pitch) *pitch = 0.0f;
-        return;
-    }
+	if (!g_bGyroSensorEnabled)
+	{
+		if (yaw) *yaw = 0.0f;
+		if (pitch) *pitch = 0.0f;
+		return;
+	}
 
-    if (g_pLooper)
-    {
-        ALooper_pollOnce(0, NULL, NULL, NULL);
-    }
+	if (g_pLooper)
+		ALooper_pollOnce(0, NULL, NULL, NULL);
 
-    if (yaw)   *yaw = g_flGyroYaw;
-    if (pitch) *pitch = g_flGyroPitch;
+	if (yaw)   *yaw = g_flGyroYaw;
+	if (pitch) *pitch = g_flGyroPitch;
 
-    g_flGyroYaw = 0.0f;
-    g_flGyroPitch = 0.0f;
+	g_flGyroYaw = 0.0f;
+	g_flGyroPitch = 0.0f;
 }
-
 
 void Gyro_Reset(void)
 {
-    g_flGyroYaw = 0.0f;
-    g_flGyroPitch = 0.0f;
-    g_flSmoothYaw = 0.0f;
-    g_flSmoothPitch = 0.0f;
-    g_bFirstEvent = true;
-    g_iLastTimestamp = 0;
+	g_flGyroYaw = 0.0f;
+	g_flGyroPitch = 0.0f;
+	g_flSmoothYaw = 0.0f;
+	g_flSmoothPitch = 0.0f;
+	g_bFirstEvent = true;
+	g_iLastTimestamp = 0;
 }
-
 
 int Gyro_IsEnabled(void)
 {
-	if (!g_bGyroInitialized)
+	if (!g_bGyroInitialized || !gyroscope)
 		return 0;
-	if (!gyroscope)
-		return 0;
-	return (gyroscope->value != 0.0f) ? 1 : 0;
+
+	return (gyroscope->value != 0.0f);
 }
 
 #else
@@ -283,26 +253,15 @@ void Gyro_Init(void)
 {
 	gyroscope = gEngfuncs.pfnRegisterVariable("gyroscope", "0", FCVAR_ARCHIVE);
 	gyroscope_sensitivity = gEngfuncs.pfnRegisterVariable("gyroscope_sensitivity", "1.0", FCVAR_ARCHIVE);
-	gEngfuncs.Con_Printf("Gyroscope: Not available on this platform\n");
 }
 
-void Gyro_Shutdown(void)
-{
-}
-
+void Gyro_Shutdown(void) {}
 void Gyro_Update(float *yaw, float *pitch)
 {
 	if (yaw) *yaw = 0.0f;
 	if (pitch) *pitch = 0.0f;
 }
-
-void Gyro_Reset(void)
-{
-}
-
-int Gyro_IsEnabled(void)
-{
-	return 0;
-}
+void Gyro_Reset(void) {}
+int Gyro_IsEnabled(void) { return 0; }
 
 #endif
