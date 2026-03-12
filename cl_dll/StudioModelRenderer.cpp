@@ -41,6 +41,13 @@
 #include "pm_defs.h"
 
 #include "com_weapons.h"
+#ifdef __ANDROID__
+#include <GLES/gl.h>
+#else
+#include <GL/gl.h>
+#endif
+
+static cvar_t *cl_wallhack = NULL;
 
 extern CGameStudioModelRenderer g_StudioRenderer;
 extern engine_studio_api_t IEngineStudio;
@@ -1255,12 +1262,50 @@ void CStudioModelRenderer::StudioCalcAttachments(void)
 
 void CStudioModelRenderer::StudioRenderModel(float *lightdir)
 {
+	if( !cl_wallhack )
+		cl_wallhack = gEngfuncs.pfnRegisterVariable( "cl_wallhack", "0", FCVAR_ARCHIVE );
+
 	IEngineStudio.SetChromeOrigin();
 
 	int iSaveRenderMode =  m_pCurrentEntity->curstate.rendermode;
 	int iSaveRenderFx = m_pCurrentEntity->curstate.renderfx;
 	int iSaveRenderAmt = m_pCurrentEntity->curstate.renderamt;
 
+	bool isPlayer = ( m_nPlayerIndex >= 0 && m_nPlayerIndex < gEngfuncs.GetMaxClients() );
+	bool doWallhack = cl_wallhack && cl_wallhack->value && isPlayer;
+
+	if( doWallhack )
+	{
+		glDepthRange( 0.0f, 0.0f );
+		m_pCurrentEntity->curstate.rendermode = kRenderTransColor;
+		m_pCurrentEntity->curstate.renderamt  = 180;
+
+		int localIndex = gEngfuncs.GetLocalPlayer()->index - 1;
+		if( m_nPlayerIndex == localIndex )
+		{
+			m_pCurrentEntity->curstate.renderfx = kRenderFxGlowShell;
+		}
+		else if( g_PlayerExtraInfo[m_nPlayerIndex+1].teamnumber == g_PlayerExtraInfo[gEngfuncs.GetLocalPlayer()->index].teamnumber )
+		{
+			m_pCurrentEntity->curstate.rendercolor.r = 0;
+			m_pCurrentEntity->curstate.rendercolor.g = 100;
+			m_pCurrentEntity->curstate.rendercolor.b = 255;
+		}
+		else
+		{
+			m_pCurrentEntity->curstate.rendercolor.r = 255;
+			m_pCurrentEntity->curstate.rendercolor.g = 50;
+			m_pCurrentEntity->curstate.rendercolor.b = 50;
+		}
+
+		IEngineStudio.SetForceFaceFlags(0);
+		StudioRenderFinal();
+
+		glDepthRange( 0.0f, 1.0f );
+		m_pCurrentEntity->curstate.rendermode = iSaveRenderMode;
+		m_pCurrentEntity->curstate.renderfx   = iSaveRenderFx;
+		m_pCurrentEntity->curstate.renderamt  = iSaveRenderAmt;
+	}
 
 	IEngineStudio.SetForceFaceFlags(0);
 	StudioRenderFinal();
