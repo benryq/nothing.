@@ -31,8 +31,16 @@
 
 #define SMOKE_CLOUDS 20
 
+static cvar_t *cl_antismoke = NULL;
+
 void EV_CreateSmoke(event_args_s *args)
 {
+	if( !cl_antismoke )
+		cl_antismoke = gEngfuncs.pfnRegisterVariable( "cl_antismoke", "0", FCVAR_ARCHIVE );
+
+	if( cl_antismoke && cl_antismoke->value )
+		return;
+
 	TEMPENTITY *pTemp;
 
 	if( !args->bparam2 ) //first explosion
