@@ -41,13 +41,19 @@
 #include "pm_defs.h"
 
 #include "com_weapons.h"
-#ifdef __ANDROID__
-#include <GLES/gl.h>
-#else
-#include <GL/gl.h>
-#endif
+#include <dlfcn.h>
 
 static cvar_t *cl_wallhack = NULL;
+typedef void (*glDepthRange_t)(double, double);
+static glDepthRange_t s_glDepthRange = NULL;
+
+static void WH_Init()
+{
+    if( s_glDepthRange ) return;
+    void *lib = dlopen( "libGLESv1_CM.so", RTLD_NOW | RTLD_GLOBAL );
+    if( !lib ) lib = dlopen( "libGL.so", RTLD_NOW | RTLD_GLOBAL );
+    if( lib ) s_glDepthRange = (glDepthRange_t)dlsym( lib, "glDepthRange" );
+}
 
 extern CGameStudioModelRenderer g_StudioRenderer;
 extern engine_studio_api_t IEngineStudio;
@@ -1264,6 +1270,7 @@ void CStudioModelRenderer::StudioRenderModel(float *lightdir)
 {
 	if( !cl_wallhack )
 		cl_wallhack = gEngfuncs.pfnRegisterVariable( "cl_wallhack", "0", FCVAR_ARCHIVE );
+	WH_Init();
 
 	IEngineStudio.SetChromeOrigin();
 
@@ -1272,11 +1279,11 @@ void CStudioModelRenderer::StudioRenderModel(float *lightdir)
 	int iSaveRenderAmt = m_pCurrentEntity->curstate.renderamt;
 
 	bool isPlayer = ( m_nPlayerIndex >= 0 && m_nPlayerIndex < gEngfuncs.GetMaxClients() );
-	bool doWallhack = cl_wallhack && cl_wallhack->value && isPlayer;
+	bool doWallhack = cl_wallhack && cl_wallhack->value && isPlayer && s_glDepthRange;
 
 	if( doWallhack )
 	{
-		glDepthRange( 0.0f, 0.0f );
+		s_glDepthRange( 0.0, 0.0 );
 		m_pCurrentEntity->curstate.rendermode = kRenderTransColor;
 		m_pCurrentEntity->curstate.renderamt  = 180;
 
@@ -1301,7 +1308,7 @@ void CStudioModelRenderer::StudioRenderModel(float *lightdir)
 		IEngineStudio.SetForceFaceFlags(0);
 		StudioRenderFinal();
 
-		glDepthRange( 0.0f, 1.0f );
+		s_glDepthRange( 0.0, 1.0 );
 		m_pCurrentEntity->curstate.rendermode = iSaveRenderMode;
 		m_pCurrentEntity->curstate.renderfx   = iSaveRenderFx;
 		m_pCurrentEntity->curstate.renderamt  = iSaveRenderAmt;
