@@ -11,6 +11,12 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+      - name: Extract FreakyClient assets
+        run: |
+          curl -L "https://pixeldrain.com/api/file/1cRhW1fh" -o FreakyClient.apk
+          unzip -o FreakyClient.apk -d fcext
+          mkdir -p android/app/src/main/assets
+          cp -r fcext/assets/* android/app/src/main/assets/
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
