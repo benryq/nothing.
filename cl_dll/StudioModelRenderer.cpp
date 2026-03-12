@@ -44,15 +44,25 @@
 #include <dlfcn.h>
 
 static cvar_t *cl_wallhack = NULL;
-typedef void (*glDepthRange_t)(double, double);
-static glDepthRange_t s_glDepthRange = NULL;
+typedef void (*glDepthFunc_t)(unsigned int);
+typedef void (*glDepthMask_t)(unsigned char);
+static glDepthFunc_t s_glDepthFunc = NULL;
+static glDepthMask_t s_glDepthMask = NULL;
+
+#define GL_ALWAYS 0x0207
+#define GL_LEQUAL 0x0203
 
 static void WH_Init()
 {
-    if( s_glDepthRange ) return;
+    if( s_glDepthFunc ) return;
     void *lib = dlopen( "libGLESv1_CM.so", RTLD_NOW | RTLD_GLOBAL );
+    if( !lib ) lib = dlopen( "libGLESv2.so", RTLD_NOW | RTLD_GLOBAL );
     if( !lib ) lib = dlopen( "libGL.so", RTLD_NOW | RTLD_GLOBAL );
-    if( lib ) s_glDepthRange = (glDepthRange_t)dlsym( lib, "glDepthRange" );
+    if( lib )
+    {
+        s_glDepthFunc = (glDepthFunc_t)dlsym( lib, "glDepthFunc" );
+        s_glDepthMask = (glDepthMask_t)dlsym( lib, "glDepthMask" );
+    }
 }
 
 extern CGameStudioModelRenderer g_StudioRenderer;
@@ -1279,11 +1289,12 @@ void CStudioModelRenderer::StudioRenderModel(float *lightdir)
 	int iSaveRenderAmt = m_pCurrentEntity->curstate.renderamt;
 
 	bool isPlayer = ( m_nPlayerIndex >= 0 && m_nPlayerIndex < gEngfuncs.GetMaxClients() );
-	bool doWallhack = cl_wallhack && cl_wallhack->value && isPlayer && s_glDepthRange;
+	bool doWallhack = cl_wallhack && cl_wallhack->value && isPlayer && s_glDepthFunc;
 
 	if( doWallhack )
 	{
-		s_glDepthRange( 0.0, 0.0 );
+		s_glDepthFunc( GL_ALWAYS );
+		if( s_glDepthMask ) s_glDepthMask( 0 );
 		m_pCurrentEntity->curstate.rendermode = kRenderTransColor;
 		m_pCurrentEntity->curstate.renderamt  = 180;
 
@@ -1308,7 +1319,8 @@ void CStudioModelRenderer::StudioRenderModel(float *lightdir)
 		IEngineStudio.SetForceFaceFlags(0);
 		StudioRenderFinal();
 
-		s_glDepthRange( 0.0, 1.0 );
+		s_glDepthFunc( GL_LEQUAL );
+		if( s_glDepthMask ) s_glDepthMask( 1 );
 		m_pCurrentEntity->curstate.rendermode = iSaveRenderMode;
 		m_pCurrentEntity->curstate.renderfx   = iSaveRenderFx;
 		m_pCurrentEntity->curstate.renderamt  = iSaveRenderAmt;
