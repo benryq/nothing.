@@ -36,9 +36,7 @@ static cvar_t *cl_autobhop = NULL;
 
 static void Bhop_Update()
 {
-	if( !cl_autobhop )
-		cl_autobhop = gEngfuncs.pfnRegisterVariable( "cl_autobhop", "0", FCVAR_ARCHIVE );
-	g_bAutoBhop = cl_autobhop ? (int)cl_autobhop->value : 0;
+	g_bAutoBhop = (in_bhop.state & 1) ? 1 : 0;
 }
 
 // =====================================================
@@ -87,28 +85,27 @@ static void Benry_Aimbot( usercmd_t *cmd )
 	int localTeam  = g_PlayerExtraInfo[pLocal->index].team_id;
 	int maxPlayers = gEngfuncs.GetMaxClients();
 
-	float bestFov = cl_aimbot_fov ? cl_aimbot_fov->value : 15.0f;
-	float smooth  = cl_aimbot_smooth ? cl_aimbot_smooth->value : 5.0f;
+	float fov    = cl_aimbot_fov ? cl_aimbot_fov->value : 15.0f;
+	float smooth = cl_aimbot_smooth ? cl_aimbot_smooth->value : 5.0f;
 	if( smooth < 1.0f ) smooth = 1.0f;
 
-	// Update target once per second
 	static Vector s_bestAngles(0,0,0);
-	static bool   s_foundTarget = false;
-	static float  s_nextUpdate  = 0.0f;
+	static bool   s_found = false;
+	static float  s_nextUpdate = 0.0f;
 	float curTime = gEngfuncs.GetClientTime();
 
 	if( curTime >= s_nextUpdate )
 	{
-		s_nextUpdate  = curTime + 1.0f;
-		s_foundTarget = false;
+		s_nextUpdate = curTime + 0.1f; // update 10x per second
+		s_found = false;
+
+		float bestFov = fov;
 
 		Vector localEye = pLocal->origin;
-		localEye.z += 18.0f; // eye height, slightly lower
+		localEye.z += 18.0f;
 
 		vec3_t viewAngles;
 		gEngfuncs.GetViewAngles( viewAngles );
-
-		float scanFov = bestFov;
 
 		for( int i = 1; i <= maxPlayers; i++ )
 		{
@@ -116,50 +113,48 @@ static void Benry_Aimbot( usercmd_t *cmd )
 
 			cl_entity_t *pEnt = gEngfuncs.GetEntityByIndex( i );
 			if( !pEnt || !pEnt->model ) continue;
-			if( pEnt->curstate.messagenum != pLocal->curstate.messagenum ) continue; // not in current frame
 			if( pEnt->curstate.effects & EF_NODRAW ) continue;
-			if( pEnt->curstate.health <= 0 ) continue;
 
-			// Skip teammates
+			// skip teammates
 			int entTeam = g_PlayerExtraInfo[i].team_id;
 			if( entTeam != 0 && entTeam == localTeam ) continue;
 
-			// Head first then chest
+			// head then chest
 			Vector targets[2];
-			targets[0] = pEnt->origin; targets[0].z += 28.0f; // head (lowered)
-			targets[1] = pEnt->origin; targets[1].z += 14.0f; // chest (lowered)
+			targets[0] = pEnt->origin; targets[0].z += 28.0f;
+			targets[1] = pEnt->origin; targets[1].z += 14.0f;
 
 			for( int t = 0; t < 2; t++ )
 			{
 				Vector diff = targets[t] - localEye;
-				float  dist = diff.Length();
+				float dist = diff.Length();
 				if( dist < 1.0f ) continue;
 
-				// Wall check via trace
+				// wall check
 				struct pmtrace_s tr;
 				gEngfuncs.pEventAPI->EV_SetTraceHull( 2 );
 				gEngfuncs.pEventAPI->EV_PlayerTrace( localEye, targets[t], PM_GLASS_IGNORE, pLocal->index, &tr );
-				if( tr.fraction < 0.97f ) continue; // wall in the way
+				if( tr.fraction < 0.97f ) continue;
 
 				float aimAngles[3];
 				AB_VectorToAngles( diff / dist, aimAngles );
 
 				float dPitch = AB_AngleDiff( aimAngles[0], viewAngles[0] );
 				float dYaw   = AB_AngleDiff( aimAngles[1], viewAngles[1] );
-				float fov    = sqrt( dPitch*dPitch + dYaw*dYaw );
+				float entFov = sqrt( dPitch*dPitch + dYaw*dYaw );
 
-				if( fov < scanFov )
+				if( entFov < bestFov )
 				{
-					scanFov = fov;
+					bestFov = entFov;
 					s_bestAngles = Vector( aimAngles[0], aimAngles[1], 0.0f );
-					s_foundTarget = true;
+					s_found = true;
 					break;
 				}
 			}
 		}
 	}
 
-	if( s_foundTarget )
+	if( s_found )
 	{
 		vec3_t viewAngles;
 		gEngfuncs.GetViewAngles( viewAngles );
@@ -174,7 +169,6 @@ static void Benry_Aimbot( usercmd_t *cmd )
 		cmd->viewangles[0] = viewAngles[0];
 		cmd->viewangles[1] = viewAngles[1];
 
-		// Auto fire when close enough
 		float aimErr = sqrt( (dPitch/smooth)*(dPitch/smooth) + (dYaw/smooth)*(dYaw/smooth) );
 		if( aimErr < 2.0f )
 			cmd->buttons |= IN_ATTACK;
@@ -610,7 +604,11 @@ void IN_UseDown (void)
 	gHUD.m_Spectator.HandleButtonsDown( IN_USE );
 }
 void IN_UseUp (void) {KeyUp(&in_use);}
-void IN_JumpDown (void)
+// Benry3D bhop button
+static kbutton_t in_bhop;
+void IN_BhopDown(void) { KeyDown(&in_bhop); }
+void IN_BhopUp(void)   { KeyUp(&in_bhop); }
+
 {
 	KeyDown(&in_jump);
 	gHUD.m_Spectator.HandleButtonsDown( IN_JUMP );
@@ -907,6 +905,12 @@ void DLLEXPORT CL_CreateMove ( float frametime, struct usercmd_s *cmd, int activ
 		VectorCopy( viewangles, oldangles );
 	}
 
+	// Benry3D bhop - holding +bhop spams jump every frame
+	if( in_bhop.state & 1 )
+	{
+		cmd->buttons |= IN_JUMP;
+	}
+
 	// Benry3D bhop + aimbot
 	Bhop_Update();
 	Benry_Aimbot( cmd );
@@ -1094,6 +1098,8 @@ void InitInput (void)
 	gEngfuncs.pfnAddCommand ("-use", IN_UseUp);
 	gEngfuncs.pfnAddCommand ("+jump", IN_JumpDown);
 	gEngfuncs.pfnAddCommand ("-jump", IN_JumpUp);
+	gEngfuncs.pfnAddCommand ("+bhop", IN_BhopDown);
+	gEngfuncs.pfnAddCommand ("-bhop", IN_BhopUp);
 	gEngfuncs.pfnAddCommand ("impulse", IN_Impulse);
 	gEngfuncs.pfnAddCommand ("+klook", IN_KLookDown);
 	gEngfuncs.pfnAddCommand ("-klook", IN_KLookUp);
