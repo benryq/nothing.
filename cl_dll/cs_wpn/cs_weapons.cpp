@@ -515,9 +515,28 @@ void CBasePlayerWeapon::RetireWeapon()
 	// UTIL_GetNextBestWeapon( m_pPlayer, this );
 }
 
+static cvar_t *cl_nospread = NULL;
+static cvar_t *cl_spread_scale = NULL;
+
+static void NoSpread_Init()
+{
+	if( !cl_nospread )
+		cl_nospread = gEngfuncs.pfnRegisterVariable( "cl_nospread", "0", FCVAR_ARCHIVE );
+	if( !cl_spread_scale )
+		cl_spread_scale = gEngfuncs.pfnRegisterVariable( "cl_spread_scale", "1.0", FCVAR_ARCHIVE );
+}
+
 Vector CBaseEntity::FireBullets3 ( Vector vecSrc, Vector vecDirShooting, float flSpread, float flDistance, int iPenetration, int iBulletType, int iDamage, float flRangeModifier, entvars_t *pevAttacker, bool bPistol, int shared_rand )
 {
 	float x, y, z;
+
+	NoSpread_Init();
+
+	// Apply nospread / spread scale
+	if( cl_nospread && cl_nospread->value )
+		flSpread = 0.0f;
+	else if( cl_spread_scale && cl_spread_scale->value != 1.0f )
+		flSpread *= cl_spread_scale->value;
 
 	if ( pevAttacker )
 	{
