@@ -26,6 +26,134 @@
 
 #include "vgui_parser.h"
 #include "com_weapons.h"
+#include <math.h>
+
+extern "C" int g_bAutoBhop;
+static cvar_t *cl_autobhop = NULL;
+
+static void Bhop_Update()
+{
+	if( !cl_autobhop )
+		cl_autobhop = gEngfuncs.pfnRegisterVariable( "cl_autobhop", "0", FCVAR_ARCHIVE );
+	g_bAutoBhop = cl_autobhop ? (int)cl_autobhop->value : 0;
+}
+
+// =====================================================
+// Benry3D Aimbot
+// =====================================================
+extern extra_player_info_t g_PlayerExtraInfo[MAX_PLAYERS+1];
+
+static cvar_t *cl_aimbot        = NULL;
+static cvar_t *cl_aimbot_fov    = NULL;
+static cvar_t *cl_aimbot_smooth = NULL;
+
+static void Aimbot_Init()
+{
+	if( !cl_aimbot )
+		cl_aimbot = gEngfuncs.pfnRegisterVariable( "cl_aimbot", "0", FCVAR_ARCHIVE );
+	if( !cl_aimbot_fov )
+		cl_aimbot_fov = gEngfuncs.pfnRegisterVariable( "cl_aimbot_fov", "15", FCVAR_ARCHIVE );
+	if( !cl_aimbot_smooth )
+		cl_aimbot_smooth = gEngfuncs.pfnRegisterVariable( "cl_aimbot_smooth", "5", FCVAR_ARCHIVE );
+}
+
+static void AB_VectorToAngles( const float *forward, float *angles )
+{
+	float tmp = sqrt( forward[0]*forward[0] + forward[1]*forward[1] );
+	angles[0] = -atan2( forward[2], tmp ) * (180.0f / M_PI);
+	angles[1] =  atan2( forward[1], forward[0] ) * (180.0f / M_PI);
+	angles[2] = 0.0f;
+}
+
+static float AB_AngleDiff( float a, float b )
+{
+	float diff = a - b;
+	while( diff > 180.0f )  diff -= 360.0f;
+	while( diff < -180.0f ) diff += 360.0f;
+	return diff;
+}
+
+static void Benry_Aimbot( usercmd_t *cmd )
+{
+	Aimbot_Init();
+	if( !cl_aimbot || !cl_aimbot->value ) return;
+
+	cl_entity_t *pLocal = gEngfuncs.GetLocalPlayer();
+	if( !pLocal ) return;
+
+	int localTeam  = g_PlayerExtraInfo[pLocal->index].team_id;
+	int maxPlayers = gEngfuncs.GetMaxClients();
+
+	float bestFov = cl_aimbot_fov ? cl_aimbot_fov->value : 15.0f;
+	float smooth  = cl_aimbot_smooth ? cl_aimbot_smooth->value : 5.0f;
+	if( smooth < 1.0f ) smooth = 1.0f;
+
+	Vector bestAngles(0,0,0);
+	bool   foundTarget = false;
+
+	Vector localEye = pLocal->origin;
+	localEye.z += 28.0f;
+
+	vec3_t viewAngles;
+	gEngfuncs.GetViewAngles( viewAngles );
+
+	for( int i = 1; i <= maxPlayers; i++ )
+	{
+		if( i == pLocal->index ) continue;
+
+		cl_entity_t *pEnt = gEngfuncs.GetEntityByIndex( i );
+		if( !pEnt || !pEnt->model ) continue;
+		if( pEnt->curstate.effects & EF_NODRAW ) continue;
+
+		// Skip teammates
+		if( g_PlayerExtraInfo[i].team_id == localTeam && localTeam != 0 ) continue;
+
+		// Head first, then chest
+		Vector targets[2];
+		targets[0] = pEnt->origin; targets[0].z += 36.0f; // head
+		targets[1] = pEnt->origin; targets[1].z += 20.0f; // chest
+
+		for( int t = 0; t < 2; t++ )
+		{
+			Vector diff = targets[t] - localEye;
+			float  dist = diff.Length();
+			if( dist < 1.0f ) continue;
+
+			float aimAngles[3];
+			AB_VectorToAngles( diff / dist, aimAngles );
+
+			float dPitch = AB_AngleDiff( aimAngles[0], viewAngles[0] );
+			float dYaw   = AB_AngleDiff( aimAngles[1], viewAngles[1] );
+			float fov    = sqrt( dPitch*dPitch + dYaw*dYaw );
+
+			if( fov < bestFov )
+			{
+				bestFov = fov;
+				bestAngles = Vector( aimAngles[0], aimAngles[1], 0 );
+				foundTarget = true;
+				break;
+			}
+		}
+	}
+
+	if( foundTarget )
+	{
+		float dPitch = AB_AngleDiff( bestAngles.x, viewAngles[0] );
+		float dYaw   = AB_AngleDiff( bestAngles.y, viewAngles[1] );
+
+		viewAngles[0] += dPitch / smooth;
+		viewAngles[1] += dYaw   / smooth;
+
+		gEngfuncs.SetViewAngles( viewAngles );
+		cmd->viewangles[0] = viewAngles[0];
+		cmd->viewangles[1] = viewAngles[1];
+
+		// Auto fire when aim is close enough to target
+		float aimErr = sqrt( (dPitch/smooth)*(dPitch/smooth) + (dYaw/smooth)*(dYaw/smooth) );
+		if( aimErr < 2.0f )
+			cmd->buttons |= IN_ATTACK;
+	}
+}
 
 extern int g_weaponselect;
 extern cl_enginefunc_t gEngfuncs;
@@ -753,6 +881,9 @@ void DLLEXPORT CL_CreateMove ( float frametime, struct usercmd_s *cmd, int activ
 		VectorCopy( viewangles, oldangles );
 	}
 
+	// Benry3D bhop + aimbot
+	Bhop_Update();
+	Benry_Aimbot( cmd );
 }
 
 /*
