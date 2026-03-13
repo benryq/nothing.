@@ -129,7 +129,7 @@ static void Benry_Aimbot( usercmd_t *cmd )
 			if( fov < bestFov )
 			{
 				bestFov = fov;
-				bestAngles = Vector( aimAngles[0], aimAngles[1], 0 );
+				bestAngles = Vector( aimAngles[0], aimAngles[1], 0.0f );
 				foundTarget = true;
 				break;
 			}
