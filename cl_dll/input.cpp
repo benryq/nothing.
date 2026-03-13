@@ -26,6 +26,9 @@
 
 #include "vgui_parser.h"
 #include "com_weapons.h"
+#include "pmtrace.h"
+#include "pm_defs.h"
+#include "event_api.h"
 #include <math.h>
 
 extern "C" int g_bAutoBhop;
@@ -133,9 +136,9 @@ static void Benry_Aimbot( usercmd_t *cmd )
 				if( dist < 1.0f ) continue;
 
 				// Wall check via trace
-				pmtrace_t tr;
+				struct pmtrace_s tr;
 				gEngfuncs.pEventAPI->EV_SetTraceHull( 2 );
-				gEngfuncs.pEventAPI->EV_PlayerTrace( localEye, targets[t], PM_NORMAL, pLocal->index, &tr );
+				gEngfuncs.pEventAPI->EV_PlayerTrace( localEye, targets[t], PM_GLASS_IGNORE, pLocal->index, &tr );
 				if( tr.fraction < 0.97f ) continue; // wall in the way
 
 				float aimAngles[3];
