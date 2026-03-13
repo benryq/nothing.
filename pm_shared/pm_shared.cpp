@@ -2434,7 +2434,7 @@ void PM_Jump()
 	// don't pogo stick
 	if (pmove->oldbuttons & IN_JUMP)
 	{
-		// Benry3D autobhop - clear old jump flag instantly when on ground
+		// Benry3D bhop - clear old jump so it fires every frame when held
 		if( g_bAutoBhop && (pmove->cmd.buttons & IN_JUMP) )
 			pmove->oldbuttons &= ~IN_JUMP;
 		else
