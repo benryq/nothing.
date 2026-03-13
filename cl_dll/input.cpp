@@ -32,7 +32,7 @@
 #include <math.h>
 
 extern "C" int g_bAutoBhop;
-static cvar_t *cl_autobhop = NULL;
+static kbutton_t in_bhop; // forward declared here, defined later
 
 static void Bhop_Update()
 {
@@ -604,11 +604,11 @@ void IN_UseDown (void)
 	gHUD.m_Spectator.HandleButtonsDown( IN_USE );
 }
 void IN_UseUp (void) {KeyUp(&in_use);}
-// Benry3D bhop button
-static kbutton_t in_bhop;
+
 void IN_BhopDown(void) { KeyDown(&in_bhop); }
 void IN_BhopUp(void)   { KeyUp(&in_bhop); }
 
+void IN_JumpDown(void)
 {
 	KeyDown(&in_jump);
 	gHUD.m_Spectator.HandleButtonsDown( IN_JUMP );
