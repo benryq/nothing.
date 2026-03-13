@@ -517,6 +517,7 @@ void CBasePlayerWeapon::RetireWeapon()
 
 static cvar_t *cl_nospread = NULL;
 static cvar_t *cl_spread_scale = NULL;
+static float g_flSpreadOverride = -1.0f;
 
 static void NoSpread_Init()
 {
@@ -524,6 +525,11 @@ static void NoSpread_Init()
 		cl_nospread = gEngfuncs.pfnRegisterVariable( "cl_nospread", "0", FCVAR_ARCHIVE );
 	if( !cl_spread_scale )
 		cl_spread_scale = gEngfuncs.pfnRegisterVariable( "cl_spread_scale", "1.0", FCVAR_ARCHIVE );
+}
+
+static void Benry_SetSpread( float flSpread )
+{
+	g_flSpreadOverride = flSpread;
 }
 
 Vector CBaseEntity::FireBullets3 ( Vector vecSrc, Vector vecDirShooting, float flSpread, float flDistance, int iPenetration, int iBulletType, int iDamage, float flRangeModifier, entvars_t *pevAttacker, bool bPistol, int shared_rand )
@@ -1488,13 +1494,6 @@ be ignored
 // =====================================================
 // Benry3D NoSpread - angle compensation method
 // =====================================================
-static float g_flSpreadOverride = -1.0f; // set by weapon PrimaryAttack, -1 = not shooting
-
-// Called from weapon PrimaryAttack hooks to tell us what spread is being used
-void Benry_SetSpread( float flSpread )
-{
-	g_flSpreadOverride = flSpread;
-}
 
 static void Benry_NoSpread( usercmd_t *cmd, unsigned int random_seed )
 {
