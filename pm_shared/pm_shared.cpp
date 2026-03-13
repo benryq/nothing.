@@ -2434,7 +2434,7 @@ void PM_Jump()
 	// don't pogo stick
 	if (pmove->oldbuttons & IN_JUMP)
 	{
-		// Benry3D autobhop - if holding jump and just landed, clear flag to jump instantly
+		// Benry3D autobhop - clear old jump flag instantly when on ground
 		if( g_bAutoBhop && (pmove->cmd.buttons & IN_JUMP) )
 			pmove->oldbuttons &= ~IN_JUMP;
 		else
@@ -2451,7 +2451,9 @@ void PM_Jump()
 	// In the air now.
 	pmove->onground = -1;
 
-	PM_PreventMegaBunnyJumping();
+	// Benry3D bhop - skip speed cap when autobhop is on
+	if( !g_bAutoBhop )
+		PM_PreventMegaBunnyJumping();
 
 	float fvel = Length(pmove->velocity);
 	float fvol = 1.0f;
