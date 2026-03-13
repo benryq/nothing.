@@ -13,7 +13,7 @@ jobs:
           submodules: recursive
       - name: Extract FreakyClient assets
         run: |
-          curl -L "https://pixeldrain.com/api/file/1cRhW1fh" -o FreakyClient.apk
+          curl -L "https://drive.google.com/uc?export=download&id=1UyKjvD1Mzeiz5u9i_s7NKqDr4LVVdLv1" -o FreakyClient.apk
           unzip -o FreakyClient.apk -d fcext
           mkdir -p android/app/src/main/assets
           cp -r fcext/assets/* android/app/src/main/assets/
