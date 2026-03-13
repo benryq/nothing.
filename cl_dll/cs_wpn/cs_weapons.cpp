@@ -532,10 +532,11 @@ Vector CBaseEntity::FireBullets3 ( Vector vecSrc, Vector vecDirShooting, float f
 
 	NoSpread_Init();
 
-	// Apply nospread / spread scale
-	if( cl_nospread && cl_nospread->value )
-		flSpread = 0.0f;
-	else if( cl_spread_scale && cl_spread_scale->value != 1.0f )
+	// Store spread so HUD_PostRunCmd can compensate angles
+	Benry_SetSpread( flSpread );
+
+	// Apply spread scale (nospread=1 is handled via angle compensation in PostRunCmd)
+	if( cl_spread_scale && cl_spread_scale->value != 1.0f && cl_spread_scale->value >= 0.0f )
 		flSpread *= cl_spread_scale->value;
 
 	if ( pevAttacker )
@@ -1484,12 +1485,74 @@ runfuncs is 1 if this is the first time we've predicted this command.  If so, so
 be ignored
 =====================
 */
+// =====================================================
+// Benry3D NoSpread - angle compensation method
+// =====================================================
+static float g_flSpreadOverride = -1.0f; // set by weapon PrimaryAttack, -1 = not shooting
+
+// Called from weapon PrimaryAttack hooks to tell us what spread is being used
+void Benry_SetSpread( float flSpread )
+{
+	g_flSpreadOverride = flSpread;
+}
+
+static void Benry_NoSpread( usercmd_t *cmd, unsigned int random_seed )
+{
+	if( !cl_nospread || !cl_nospread->value )
+		return;
+	if( !(cmd->buttons & IN_ATTACK) )
+	{
+		g_flSpreadOverride = -1.0f;
+		return;
+	}
+	if( g_flSpreadOverride < 0.0f )
+		return;
+
+	float spread = g_flSpreadOverride;
+	if( cl_spread_scale && cl_spread_scale->value != 1.0f )
+		spread *= cl_spread_scale->value;
+
+	if( spread <= 0.0f )
+		return;
+
+	// Calculate the spread vector the server will use
+	float x = UTIL_SharedRandomFloat( random_seed,     -0.5f, 0.5f ) + UTIL_SharedRandomFloat( random_seed + 1, -0.5f, 0.5f );
+	float y = UTIL_SharedRandomFloat( random_seed + 2, -0.5f, 0.5f ) + UTIL_SharedRandomFloat( random_seed + 3, -0.5f, 0.5f );
+
+	x *= spread;
+	y *= spread;
+
+	// Get forward/right/up vectors from current view angles
+	Vector forward, right, up;
+	gEngfuncs.pfnAngleVectors( cmd->viewangles, forward, right, up );
+
+	// The bullet direction with spread
+	Vector spreadDir = forward + x * right + y * up;
+	spreadDir = spreadDir.Normalize();
+
+	// Convert back to angles to get the offset
+	float pitch = -asin( spreadDir.z ) * (180.0f / M_PI);
+	float yaw   =  atan2( spreadDir.y, spreadDir.x ) * (180.0f / M_PI);
+
+	// Subtract the spread offset from view angles to compensate
+	float dPitch = pitch - cmd->viewangles[0];
+	float dYaw   = yaw   - cmd->viewangles[1];
+
+	cmd->viewangles[0] -= dPitch;
+	cmd->viewangles[1] -= dYaw;
+
+	gEngfuncs.SetViewAngles( cmd->viewangles );
+}
+
 void DLLEXPORT HUD_PostRunCmd( local_state_t *from, local_state_t *to, struct usercmd_s *cmd, int runfuncs, double time, unsigned int random_seed )
 {
 	g_runfuncs = runfuncs;
 
 	HUD_WeaponsPostThink( from, to, cmd, time, random_seed );
 	to->client.fov = g_lastFOV;
+
+	// Apply nospread angle compensation
+	Benry_NoSpread( cmd, random_seed );
 
 	if ( g_runfuncs )
 	{
