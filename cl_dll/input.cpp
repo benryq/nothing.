@@ -88,58 +88,81 @@ static void Benry_Aimbot( usercmd_t *cmd )
 	float smooth  = cl_aimbot_smooth ? cl_aimbot_smooth->value : 5.0f;
 	if( smooth < 1.0f ) smooth = 1.0f;
 
-	Vector bestAngles(0,0,0);
-	bool   foundTarget = false;
+	// Update target once per second
+	static Vector s_bestAngles(0,0,0);
+	static bool   s_foundTarget = false;
+	static float  s_nextUpdate  = 0.0f;
+	float curTime = gEngfuncs.GetClientTime();
 
-	Vector localEye = pLocal->origin;
-	localEye.z += 28.0f;
-
-	vec3_t viewAngles;
-	gEngfuncs.GetViewAngles( viewAngles );
-
-	for( int i = 1; i <= maxPlayers; i++ )
+	if( curTime >= s_nextUpdate )
 	{
-		if( i == pLocal->index ) continue;
+		s_nextUpdate  = curTime + 1.0f;
+		s_foundTarget = false;
 
-		cl_entity_t *pEnt = gEngfuncs.GetEntityByIndex( i );
-		if( !pEnt || !pEnt->model ) continue;
-		if( pEnt->curstate.effects & EF_NODRAW ) continue;
+		Vector localEye = pLocal->origin;
+		localEye.z += 18.0f; // eye height, slightly lower
 
-		// Skip teammates
-		if( g_PlayerExtraInfo[i].team_id == localTeam && localTeam != 0 ) continue;
+		vec3_t viewAngles;
+		gEngfuncs.GetViewAngles( viewAngles );
 
-		// Head first, then chest
-		Vector targets[2];
-		targets[0] = pEnt->origin; targets[0].z += 36.0f; // head
-		targets[1] = pEnt->origin; targets[1].z += 20.0f; // chest
+		float scanFov = bestFov;
 
-		for( int t = 0; t < 2; t++ )
+		for( int i = 1; i <= maxPlayers; i++ )
 		{
-			Vector diff = targets[t] - localEye;
-			float  dist = diff.Length();
-			if( dist < 1.0f ) continue;
+			if( i == pLocal->index ) continue;
 
-			float aimAngles[3];
-			AB_VectorToAngles( diff / dist, aimAngles );
+			cl_entity_t *pEnt = gEngfuncs.GetEntityByIndex( i );
+			if( !pEnt || !pEnt->model ) continue;
+			if( pEnt->curstate.messagenum != pLocal->curstate.messagenum ) continue; // not in current frame
+			if( pEnt->curstate.effects & EF_NODRAW ) continue;
+			if( pEnt->curstate.health <= 0 ) continue;
 
-			float dPitch = AB_AngleDiff( aimAngles[0], viewAngles[0] );
-			float dYaw   = AB_AngleDiff( aimAngles[1], viewAngles[1] );
-			float fov    = sqrt( dPitch*dPitch + dYaw*dYaw );
+			// Skip teammates
+			int entTeam = g_PlayerExtraInfo[i].team_id;
+			if( entTeam != 0 && entTeam == localTeam ) continue;
 
-			if( fov < bestFov )
+			// Head first then chest
+			Vector targets[2];
+			targets[0] = pEnt->origin; targets[0].z += 28.0f; // head (lowered)
+			targets[1] = pEnt->origin; targets[1].z += 14.0f; // chest (lowered)
+
+			for( int t = 0; t < 2; t++ )
 			{
-				bestFov = fov;
-				bestAngles = Vector( aimAngles[0], aimAngles[1], 0.0f );
-				foundTarget = true;
-				break;
+				Vector diff = targets[t] - localEye;
+				float  dist = diff.Length();
+				if( dist < 1.0f ) continue;
+
+				// Wall check via trace
+				pmtrace_t tr;
+				gEngfuncs.pEventAPI->EV_SetTraceHull( 2 );
+				gEngfuncs.pEventAPI->EV_PlayerTrace( localEye, targets[t], PM_NORMAL, pLocal->index, &tr );
+				if( tr.fraction < 0.97f ) continue; // wall in the way
+
+				float aimAngles[3];
+				AB_VectorToAngles( diff / dist, aimAngles );
+
+				float dPitch = AB_AngleDiff( aimAngles[0], viewAngles[0] );
+				float dYaw   = AB_AngleDiff( aimAngles[1], viewAngles[1] );
+				float fov    = sqrt( dPitch*dPitch + dYaw*dYaw );
+
+				if( fov < scanFov )
+				{
+					scanFov = fov;
+					s_bestAngles = Vector( aimAngles[0], aimAngles[1], 0.0f );
+					s_foundTarget = true;
+					break;
+				}
 			}
 		}
 	}
 
-	if( foundTarget )
+	if( s_foundTarget )
 	{
-		float dPitch = AB_AngleDiff( bestAngles.x, viewAngles[0] );
-		float dYaw   = AB_AngleDiff( bestAngles.y, viewAngles[1] );
+		vec3_t viewAngles;
+		gEngfuncs.GetViewAngles( viewAngles );
+
+		float dPitch = AB_AngleDiff( s_bestAngles.x, viewAngles[0] );
+		float dYaw   = AB_AngleDiff( s_bestAngles.y, viewAngles[1] );
 
 		viewAngles[0] += dPitch / smooth;
 		viewAngles[1] += dYaw   / smooth;
@@ -148,7 +171,7 @@ static void Benry_Aimbot( usercmd_t *cmd )
 		cmd->viewangles[0] = viewAngles[0];
 		cmd->viewangles[1] = viewAngles[1];
 
-		// Auto fire when aim is close enough to target
+		// Auto fire when close enough
 		float aimErr = sqrt( (dPitch/smooth)*(dPitch/smooth) + (dYaw/smooth)*(dYaw/smooth) );
 		if( aimErr < 2.0f )
 			cmd->buttons |= IN_ATTACK;
