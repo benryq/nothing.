@@ -14,6 +14,9 @@
 #include <ctype.h>
 #include "com_model.h"
 
+// Benry3D autobhop - toggled from input.cpp
+int g_bAutoBhop = 0;
+
 #ifndef min
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
@@ -2431,7 +2434,11 @@ void PM_Jump()
 	// don't pogo stick
 	if (pmove->oldbuttons & IN_JUMP)
 	{
-		return;
+		// Benry3D autobhop - if holding jump and just landed, clear flag to jump instantly
+		if( g_bAutoBhop && (pmove->cmd.buttons & IN_JUMP) )
+			pmove->oldbuttons &= ~IN_JUMP;
+		else
+			return;
 	}
 
 	if (pmove->bInDuck && (pmove->flags & FL_DUCKING))
