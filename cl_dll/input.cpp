@@ -113,6 +113,7 @@ static void Benry_Aimbot( usercmd_t *cmd )
 
 			cl_entity_t *pEnt = gEngfuncs.GetEntityByIndex( i );
 			if( !pEnt || !pEnt->model ) continue;
+			if( !pEnt->player ) continue;
 			if( pEnt->curstate.effects & EF_NODRAW ) continue;
 
 			// skip teammates
@@ -168,10 +169,6 @@ static void Benry_Aimbot( usercmd_t *cmd )
 		gEngfuncs.SetViewAngles( viewAngles );
 		cmd->viewangles[0] = viewAngles[0];
 		cmd->viewangles[1] = viewAngles[1];
-
-		float aimErr = sqrt( (dPitch/smooth)*(dPitch/smooth) + (dYaw/smooth)*(dYaw/smooth) );
-		if( aimErr < 2.0f )
-			cmd->buttons |= IN_ATTACK;
 	}
 }
 
@@ -795,6 +792,8 @@ if active == 1 then we are 1) not playing back demos ( where our commands are ig
 */
 void DLLEXPORT CL_CreateMove ( float frametime, struct usercmd_s *cmd, int active )
 {	
+	// Update bhop state first thing every frame
+	Bhop_Update();
 	float spd;
 	vec3_t viewangles;
 	static vec3_t oldangles;
@@ -912,7 +911,6 @@ void DLLEXPORT CL_CreateMove ( float frametime, struct usercmd_s *cmd, int activ
 	}
 
 	// Benry3D bhop + aimbot
-	Bhop_Update();
 	Benry_Aimbot( cmd );
 }
 
